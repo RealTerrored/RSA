@@ -2,10 +2,8 @@ import argparse
 import os
 import time
 import math
-import threading
-from multiprocessing import Process, Pipe, Queue
 from tqdm import tqdm
-from tqdm.contrib.concurrent import process_map
+from multiprocessing import Process, Pipe, Queue
 start = time.perf_counter()
 class bcolors:
     HEADER = '\033[95m'
@@ -17,37 +15,47 @@ class bcolors:
     ENDC = '\033[0m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
-def test():
-    time.sleep(1)
-def Job(low, high, format, conn, process_num, total_processes):
+def progress(low, high, que:Queue, que2:Queue, debug):
+    progressing = tqdm(total=high-low, disable=debug, smoothing=0.5, leave=True, unit="Nums", desc="Generating primes", unit_scale=True)
+    value = 0
+    while(True):
+        progressing.n = 2*value + que.qsize()
+        progressing.update()
+        if (not que2.empty()):
+            progressing.total = que2.get()
+            break
+def Job(low, high, format, conn, process_num, total_processes, que:Queue, que3:Queue):
     time.sleep(process_num)
     num_range = high - low
     sets = set()
     i = 3
     low1 = low + math.ceil((num_range/total_processes)*process_num)
     high1 = high - math.floor((num_range/total_processes)*(total_processes-(process_num+1)))
-    globals()["progress" + str(process_num)] = tqdm(total=math.ceil(high1-low1), desc="Finding values in process " + str(process_num), unit="nums", leave= False)
     if (low1 % 2 == 0):
         low1 = low1 + 1
     if (high1 % 2 == 0):
         high1 = high1 + 1
     while(low1 <= high1):
+        if(len(sets) >= 500):
+            conn.send(sets)
+            sets = set()
         if (low1 % i != 0):
             i = i + 2
             if (i >= low1):
                 if (format == 1):
                     sets.add(hex(low1))
-                    globals()["progress" + str(process_num)]:tqdm.update(1)
+                    que.put(True, block=False)
                 else:
                     sets.add(low1)
-                    #finding1.update(1)
+                    que.put(True, block=False)
                 i = 3
                 low1 = low1 + 2
         else:
-            #finding1.update(1)
             low1 = low1 + 2
             i = 3
+            que.put(True, block=False)
     conn.send(sets)
+    que3.put(1)
 if __name__ == '__main__':
     os.system("cls")
     parser = argparse.ArgumentParser(description='Primal number locator')
@@ -70,6 +78,9 @@ if __name__ == '__main__':
     prime_set = set()
     conn1, conn2 = Pipe()
     temp = 0
+    que = Queue()
+    que2 = Queue()
+    que3 = Queue()
 
     debug = False
 
@@ -114,28 +125,27 @@ if __name__ == '__main__':
                 break
     elif (mode == 2):
         output = open(path, choice)
-        
-        #total = tqdm(total=math.floor((high-low)*1.33), desc="Main progress", unit="nums", leave= False, disable=debug)
-        total = process_map()
-        writing = tqdm(desc="Writing values", unit="nums", leave= False, disable=debug)
+        progress_update = Process(target=progress, args=(low, high, que, que2, debug))
+        progress_update.start()
 
         for x in range(process_num):
-            globals() ["process" + str(x)] = Process(target=Job, args=(low, high, format, conn2, x, process_num))
+            globals() ["process" + str(x)] = Process(target=Job, args=(low, high, format, conn2, x, process_num, que, que3))
             globals() ["process" + str(x)].start()
 
         
-
+        while (que3.qsize() != process_num):
+            for x in range(process_num):
+                prime_set = prime_set.union(conn1.recv())
+                tqdm.write(str(que3.qsize()))
         for x in range(process_num):
-            prime_set = prime_set.union(conn1.recv())
+            globals() ["process" + str(x)].terminate()
+
+        
         prime_set = sorted(prime_set)
+        que2.put(len(prime_set))
+        progress_update.join()
     
-    writing.total = (len(prime_set))
-    total.total = ((high-low)+len(prime_set))
     for val in prime_set:
         output.write(str(val) + ";")
-        writing.update(1)
-        total.update(1)
-    writing.close()
-    total.close()
     end = time.perf_counter()
     print(bcolors.OKBLUE + " Successfuly finished in " + str(math.floor((end-start)*100)/100) + " seconds!" + bcolors.ENDC)

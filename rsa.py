@@ -99,6 +99,7 @@ path = args.path
 if (path == None):
     Tk().withdraw()
     path = askopenfilename()
+    start = time.perf_counter()
 try:
     file = open(path, "r")
 except:
